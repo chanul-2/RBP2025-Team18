@@ -80,9 +80,9 @@ class DetermineColor(Node):
             c = get_dominant_color(image)
             print(c)
             if c == 'R':
-                msg.frame_id = '1'   # CCW
+                msg.frame_id = '-1'   # CCW
             elif c == 'B':
-                msg.frame_id = '-1'  # CW
+                msg.frame_id = '1'  # CW
             elif c == 'G':
                 msg.frame_id = '0'   # STOP
 
