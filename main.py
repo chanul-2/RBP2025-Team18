@@ -69,7 +69,6 @@ class DetermineColor(Node):
             msg.frame_id = '0'  # default: STOP
 
             c = improved_dominant_color_in_monitor(image)
-            print(c)
             if c == 'R':
                 msg.frame_id = '-1'   # CCW
             elif c == 'B':
