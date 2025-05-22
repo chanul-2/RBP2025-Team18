@@ -8,56 +8,49 @@ from cv_bridge import CvBridge, CvBridgeError
 from std_msgs.msg import Header
 import numpy as np
 
-def detect_monitor(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY_INV)
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+import cv2
+import numpy as np
 
-    if not contours:
-        return None
+def improved_dominant_color_in_monitor(image):
+    # 1) 이미지 크기
+    h, w = image.shape[:2]
 
-    # 가장 큰 사각형을 모니터로 가정
-    monitor_contour = max(contours, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(monitor_contour)
-
-    # 화면 내부를 테두리에서 조금 떨어진 곳으로 잡음 제거
-    margin = int(min(w, h) * 0.05)  # 화면 경계 5% 제거
-    x, y, w, h = x + margin, y + margin, w - 2 * margin, h - 2 * margin
-
-    if w * h >= 2000:
-        monitor_region = image[y:y+h, x:x+w]
-        return monitor_region
-    else:
-        return None
-
-def get_dominant_color(image):
+    # 2) HSV 변환
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h_ch, s_ch, v_ch = cv2.split(hsv)
 
-    mask_red1 = (hsv[:, :, 0] < 20) & (hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 50)
-    mask_red2 = (hsv[:, :, 0] > 160) & (hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 50)
-    mask_red = mask_red1 | mask_red2
+    # 3) R/G/B 마스크 생성
+    bright = (v_ch > 50)
+    r_m = (((h_ch < 20) | (h_ch > 160)) & (s_ch > 50) & (v_ch > 50)).astype(np.uint8) * 255
+    g_m = ((h_ch > 40) & (h_ch < 80) & (s_ch > 50) & (v_ch > 50)).astype(np.uint8) * 255
+    b_m = ((h_ch > 100) & (h_ch < 140) & (s_ch > 50) & (v_ch > 50)).astype(np.uint8) * 255
+    mask_rgb = (bright & ((r_m > 0) | (g_m > 0) | (b_m > 0))).astype(np.uint8) * 255
 
-    mask_green = (hsv[:, :, 0] > 40) & (hsv[:, :, 0] < 80) & (hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 50)
-    mask_blue = (hsv[:, :, 0] > 100) & (hsv[:, :, 0] < 140) & (hsv[:, :, 1] > 50) & (hsv[:, :, 2] > 50)
+    # 4) 화면 영역 컨투어 검출 + 유효 영역(2000px 이상)
+    cnts, _ = cv2.findContours(mask_rgb, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    valid = [c for c in cnts if cv2.contourArea(c) > 2000]
+    if not valid:
+        return None
 
-    count_red = np.sum(mask_red)
-    count_green = np.sum(mask_green)
-    count_blue = np.sum(mask_blue)
+    # 5) 유효한 컨투어 병합 → 최소 회전 사각형 추출
+    all_pts = np.vstack(valid)
+    hull = cv2.convexHull(all_pts)
+    rect = cv2.minAreaRect(hull)
+    box = cv2.boxPoints(rect).astype(np.int32)
 
-    total_pixels = count_red + count_green + count_blue
-    if total_pixels == 0:
-        return "N/A"
+    # 6) 모니터 마스크 생성
+    monitor_mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.drawContours(monitor_mask, [box], -1, 255, thickness=-1)
 
-    red_ratio = count_red / total_pixels
-    green_ratio = count_green / total_pixels
-    blue_ratio = count_blue / total_pixels
+    # 7) R/G/B 픽셀 수 계산 (모니터 내부만)
+    R = int(cv2.countNonZero(((r_m > 0) & (monitor_mask > 0)).astype(np.uint8)))
+    G = int(cv2.countNonZero(((g_m > 0) & (monitor_mask > 0)).astype(np.uint8)))
+    B = int(cv2.countNonZero(((b_m > 0) & (monitor_mask > 0)).astype(np.uint8)))
 
-    if red_ratio >= green_ratio and red_ratio >= blue_ratio:
-        return "R"
-    elif green_ratio >= red_ratio and green_ratio >= blue_ratio:
-        return "G"
-    else:
-        return "B"
+    # 8) 주된 색 결정
+    dominant = max([("R", R), ("G", G), ("B", B)], key=lambda x: x[1])[0]
+
+    return dominant
 
 class DetermineColor(Node):
     def __init__(self):
@@ -75,7 +68,7 @@ class DetermineColor(Node):
             msg = data.header
             msg.frame_id = '0'  # default: STOP
 
-            c = get_dominant_color(image)
+            c = improved_dominant_color_in_monitor(image)
             print(c)
             if c == 'R':
                 msg.frame_id = '-1'   # CCW
