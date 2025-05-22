@@ -74,8 +74,6 @@ class DetermineColor(Node):
                 msg.frame_id = '-1'   # CCW
             elif c == 'B':
                 msg.frame_id = '1'  # CW
-            elif c == 'G':
-                msg.frame_id = '0'   # STOP
 
             self.color_pub.publish(msg)
 
