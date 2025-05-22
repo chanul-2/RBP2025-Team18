@@ -70,8 +70,6 @@ class DetermineColor(Node):
     def callback(self, data):
         try:
             image = self.bridge.imgmsg_to_cv2(data, 'bgr8')
-            cv2.imshow('Image', image)
-            cv2.waitKey(1)
 
             msg = Header()
             msg = data.header
