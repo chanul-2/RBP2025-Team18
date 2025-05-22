@@ -8,11 +8,8 @@ from cv_bridge import CvBridge, CvBridgeError
 from std_msgs.msg import Header
 import numpy as np
 
-import cv2
-import numpy as np
-
 def improved_dominant_color_in_monitor(image):
-    # 1) 이미지 크기
+    # 1) 이미지 로드
     h, w = image.shape[:2]
 
     # 2) HSV 변환
@@ -26,31 +23,38 @@ def improved_dominant_color_in_monitor(image):
     b_m = ((h_ch > 100) & (h_ch < 140) & (s_ch > 50) & (v_ch > 50)).astype(np.uint8) * 255
     mask_rgb = (bright & ((r_m > 0) | (g_m > 0) | (b_m > 0))).astype(np.uint8) * 255
 
-    # 4) 화면 영역 컨투어 검출 + 유효 영역(2000px 이상)
+    # 4) 컨투어 검출 + 유효 영역 필터링
     cnts, _ = cv2.findContours(mask_rgb, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    valid = [c for c in cnts if cv2.contourArea(c) > 2000]
+    valid = [c for c in cnts if cv2.contourArea(c) > 5000]
     if not valid:
         return None
 
-    # 5) 유효한 컨투어 병합 → 최소 회전 사각형 추출
+    # 5) 모든 유효 컨투어 병합 → 회전 사각형
     all_pts = np.vstack(valid)
     hull = cv2.convexHull(all_pts)
     rect = cv2.minAreaRect(hull)
     box = cv2.boxPoints(rect).astype(np.int32)
 
-    # 6) 모니터 마스크 생성
+    # 6) 박스 내부 마스크 생성
     monitor_mask = np.zeros((h, w), dtype=np.uint8)
     cv2.drawContours(monitor_mask, [box], -1, 255, thickness=-1)
 
-    # 7) R/G/B 픽셀 수 계산 (모니터 내부만)
+    # 7) RGB 픽셀 수 계산
     R = int(cv2.countNonZero(((r_m > 0) & (monitor_mask > 0)).astype(np.uint8)))
     G = int(cv2.countNonZero(((g_m > 0) & (monitor_mask > 0)).astype(np.uint8)))
     B = int(cv2.countNonZero(((b_m > 0) & (monitor_mask > 0)).astype(np.uint8)))
+    rgb_total = R + G + B
+    area_total = int(cv2.countNonZero(monitor_mask))
 
-    # 8) 주된 색 결정
-    dominant = max([("R", R), ("G", G), ("B", B)], key=lambda x: x[1])[0]
+    # 9) 주된 색상 결정
+    dominant_color, dominant_count = max([("R", R), ("G", G), ("B", B)], key=lambda x: x[1])
 
-    return dominant
+    # dominant가 RGB 이외보다 적으면 무효 처리
+    if dominant_count < (area_total - rgb_total):
+        return None
+
+    return dominant_color
+
 
 class DetermineColor(Node):
     def __init__(self):
